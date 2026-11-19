@@ -38,7 +38,7 @@
   // ---------- point cloud ----------
   let PTS = null;
 
-  function build(seed){
+  function build(seed, combo){
     const rnd = mulberry32(seed);
     const R = (a=0,b=1)=>a+(b-a)*rnd();
     const X=[],Y=[],Z=[],NX=[],NY=[],NZ=[],CR=[],CG=[],CB=[],SW=[],PH=[],KD=[];
@@ -163,17 +163,17 @@
     }
 
     // place flowers with simple rejection sampling
-    const types=['cosmos','cosmos','cone','cone','gpoppy','gpoppy','daisy','corn','lupine','lupine','lace','susan'];
+    const types=combo.types;
     const spots=[];
-    for(let tries=0; spots.length<19 && tries<2000; tries++){
+    for(let tries=0; spots.length<combo.n && tries<2000; tries++){
       const r=Math.sqrt(R())*2.0, a=R(0,Math.PI*2);
       const x=Math.cos(a)*r, z=Math.sin(a)*r;
-      if(spots.every(s=>Math.hypot(s[0]-x,s[1]-z)>0.62)) spots.push([x,z]);
+      if(spots.every(s=>Math.hypot(s[0]-x,s[1]-z)>combo.gap)) spots.push([x,z]);
     }
     for(const [x,z] of spots) flower(x,z,types[Math.floor(R()*types.length)]);
 
     // grass
-    for(let g=0; g<110; g++){
+    for(let g=0; g<combo.grass; g++){
       phase=R(0,Math.PI*2); sway=2.6;
       const r=Math.sqrt(R())*2.6, a=R(0,Math.PI*2);
       const base=[Math.cos(a)*r,0,Math.sin(a)*r];
@@ -201,10 +201,34 @@
     PTS={X:F(X),Y:F(Y),Z:F(Z),NX:F(NX),NY:F(NY),NZ:F(NZ),CR:F(CR),CG:F(CG),CB:F(CB),SW:F(SW),PH:F(PH),KD:Uint8Array.from(KD),n:X.length};
   }
 
+  // ---------- flower combos: one is picked at random on every load ----------
+  const COMBOS = [
+    { name:'prairie',      n:20, gap:0.58, grass:150, types:['susan','susan','cone','cone','lupine','corn','lace','daisy'] },
+    { name:'cottage',      n:19, gap:0.60, grass:100, types:['cosmos','cosmos','daisy','daisy','lace','corn','cone'] },
+    { name:'poppy field',  n:24, gap:0.52, grass:130, types:['poppy','poppy','poppy','poppy','corn','daisy'] },
+    { name:'golden hills', n:22, gap:0.55, grass:120, types:['gpoppy','gpoppy','gpoppy','lupine','lupine','daisy'] },
+    { name:'daisy patch',  n:24, gap:0.52, grass:110, types:['daisy','daisy','daisy','daisy','lace','corn'] },
+    { name:'lupine slope', n:18, gap:0.64, grass:120, types:['lupine','lupine','lupine','gpoppy','daisy'] },
+    { name:'sunset',       n:20, gap:0.58, grass:100, types:['susan','gpoppy','poppy','cosmos','susan','gpoppy'] },
+    { name:'cool blues',   n:20, gap:0.58, grass:110, types:['corn','corn','lupine','cone','daisy','lace'] },
+    { name:'pink parade',  n:19, gap:0.60, grass:100, types:['cosmos','cosmos','cone','cone','poppy','lace'] },
+    { name:'moonlight',    n:20, gap:0.58, grass:90,  types:['lace','lace','daisy','daisy','daisy','corn'] },
+    { name:'wild mix',     n:21, gap:0.56, grass:120, types:['daisy','susan','poppy','gpoppy','cosmos','cone','corn','lupine','lace'] },
+    { name:'sparse & tall',n:11, gap:0.95, grass:70,  types:['lace','lupine','cosmos','susan','cone'] },
+  ];
+  function pickCombo(){
+    let last=-1;
+    try { last = parseInt(localStorage.getItem('wildflowers-last-combo'),10); } catch(e) {}
+    let i;
+    do { i = Math.floor(Math.random()*COMBOS.length); } while (COMBOS.length>1 && i===last);
+    try { localStorage.setItem('wildflowers-last-combo', String(i)); } catch(e) {}
+    return COMBOS[i];
+  }
+
   // ---------- render state ----------
   let W=0,H=0,dpr=1,fs=10,cw=6,ch=10,cols=0,rows=0;
   let zb,lb,rb,gb,bb;
-  const state={theta:0.6, phi:0.36, dist:6.2, speed:1, wind:1, paused:false, mono:false, dragging:false};
+  const state={theta:Math.random()*Math.PI*2, phi:0.36, dist:6.2, speed:1, wind:1, paused:false, mono:false, dragging:false};
   const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   if(reduce) state.paused=true;
 
@@ -305,7 +329,8 @@
 
 
   addEventListener('resize',resize);
-  build(81142026);
+  const combo = pickCombo();
+  build((Math.random()*4294967296)>>>0, combo);
   resize();
   (document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(()=>{resize();});
   requestAnimationFrame(frame);
