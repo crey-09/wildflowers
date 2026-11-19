@@ -326,6 +326,7 @@
     { name:'late asters',       months:[10,11],    n:18, gap:0.62, grass:110, tone:'autumn', types:['aster','aster','aster','seedhead','drylace'] },
     { name:'going to seed',     months:[10,11],    n:20, gap:0.58, grass:120, tone:'autumn', types:['seedhead','seedhead','aster','goldenrod','drylace','susan'] },
   ];
+  let monthSeed = 0;
   function pickCombo(){
     const now = new Date();                       // the visitor's own local clock
     const month = window.__month || (now.getMonth()+1);
@@ -339,6 +340,7 @@
     h = Math.imul(h ^ (h>>>15), 2246822519) >>> 0;
     h = Math.imul(h ^ (h>>>13), 3266489917) >>> 0;
     h = (h ^ (h>>>16)) >>> 0;
+    monthSeed = h;
     return pool[h % pool.length];
   }
 
@@ -468,7 +470,8 @@
   const combo = pickCombo();
   CY = combo.cy || 0.95;
   if(combo.dist) state.dist = combo.dist;
-  build((Math.random()*4294967296)>>>0, combo);
+  state.theta = (monthSeed % 6283)/1000;   // same starting angle all month
+  build(monthSeed, combo);                  // same layout all month
   resize();
   (document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(()=>{resize();});
   requestAnimationFrame(frame);
