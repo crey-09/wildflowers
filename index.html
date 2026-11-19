@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASCII Wildflowers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#090b0e; --ink:#d9dccf; --dim:#7c8274; --line:#22272c; --pill:#12161acc; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+    font-family:"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+  body { background: radial-gradient(ellipse at 50% 45%, #141a17 0%, var(--bg) 70%); }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+  canvas.dragging { cursor:grabbing; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const RAMP = ".,-~:;=!*#$@";
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  // ---------- tiny vector helpers ----------
+  const add = (a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+  const mul = (a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+  const cross = (a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const norm = a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return [a[0]/l,a[1]/l,a[2]/l];};
+  const basis = A=>{const t=Math.abs(A[1])<0.9?[0,1,0]:[1,0,0];const U=norm(cross(A,t));return [U,cross(A,U)];};
+  const lerp3 = (a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];
+
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+  // ---------- point cloud ----------
+  let PTS = null;
+
+  function build(seed){
+    const rnd = mulberry32(seed);
+    const R = (a=0,b=1)=>a+(b-a)*rnd();
+    const X=[],Y=[],Z=[],NX=[],NY=[],NZ=[],CR=[],CG=[],CB=[],SW=[],PH=[],KD=[];
+    let phase=0, sway=1;
+    const put=(p,n,c,kind=0)=>{X.push(p[0]);Y.push(p[1]);Z.push(p[2]);
+      const nn=norm(n);NX.push(nn[0]);NY.push(nn[1]);NZ.push(nn[2]);
+      CR.push(c[0]);CG.push(c[1]);CB.push(c[2]);SW.push(sway);PH.push(phase);KD.push(kind);};
+
+    // sampled ribbon: P(u) along a curve with width direction W, tapering
+    function ribbon(P0, D, W, len, width, curlAxis, curl, color, colorTip, opts={}){
+      const us = Math.max(8, Math.round(len*95));
+      const vs = Math.max(3, Math.round(width*90));
+      const start = opts.start||0;
+      for(let i=0;i<=us;i++){
+        const u=i/us;
+        const prof = opts.profile ? opts.profile(u) : Math.sin(Math.PI*(0.12+0.88*u));
+        const along = add(mul(D,start+u*len), mul(curlAxis,curl*u*u));
+        const dPu = add(mul(D,len), mul(curlAxis,2*curl*u));
+        const N = cross(dPu, W);
+        const col = colorTip ? lerp3(color,colorTip,u) : color;
+        for(let j=0;j<=vs;j++){
+          const v = (j/vs)*2-1;
+          put(add(P0, add(along, mul(W, v*width*prof))), N, col);
+        }
+      }
+    }
+    function blob(C, A, U, V, r, flat, color, count, hemi=-0.3){
+      const n = count||Math.max(50, Math.round(r*r*52000));
+      const g = Math.PI*(3-Math.sqrt(5));
+      for(let i=0;i<n;i++){
+        const z=1-(i/(n-1))*2; if(z<hemi) continue;
+        const rr=Math.sqrt(1-z*z), a=i*g;
+        const x=Math.cos(a)*rr, y=Math.sin(a)*rr;
+        const p = add(C, add(add(mul(U,x*r),mul(V,y*r)),mul(A,z*r*flat)));
+        put(p, add(add(mul(U,x),mul(V,y)),mul(A,z/flat)), color);
+      }
+    }
+
+    const STEM=[74,140,62], LEAF=[66,158,70];
+
+    const HS=1.55;
+    function flower(x,z,type){
+      phase = R(0,Math.PI*2); sway = 1;
+      const h = type==='lace'? R(1.4,1.9) : type==='lupine'? R(1.0,1.4) : R(0.95,1.9);
+      const bx=R(-0.25,0.25), bz=R(-0.25,0.25);
+      const Pt=t=>[x+bx*t*t, h*t, z+bz*t*t];
+      const Tt=t=>norm([2*bx*t, h, 2*bz*t]);
+      // stem
+      const steps=Math.round(h*75), ang=6, sr=0.016;
+      for(let i=0;i<=steps;i++){
+        const t=i/steps, c=Pt(t), T=Tt(t), [U,V]=basis(T);
+        for(let k=0;k<ang;k++){const a=k/ang*Math.PI*2;const n=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));put(add(c,mul(n,sr)),n,STEM);}
+      }
+      // leaves
+      const nl = type==='lace'?3:2;
+      for(let l=0;l<nl;l++){
+        const t=R(0.18,0.55), b=R(0,Math.PI*2);
+        const r=[Math.cos(b),0,Math.sin(b)];
+        const D=norm(add(mul(r,0.8),[0,0.6,0])), W=[-Math.sin(b),0,Math.cos(b)];
+        ribbon(Pt(t), D, W, R(0.18,0.28), 0.035, [0,1,0], -0.09, LEAF, [96,178,84]);
+      }
+      // head
+      const C=Pt(1);
+      const A=norm(add(Tt(1), [R(-0.35,0.35),0.1,R(-0.35,0.35)]));
+      const [U,V]=basis(A);
+      const petals=(n,len,width,tilt,curl,col,tip,rc,off=0)=>{
+        for(let k=0;k<n;k++){
+          const a=off+k/n*Math.PI*2+R(-0.05,0.05);
+          const r=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));
+          const D=norm(add(mul(r,Math.cos(tilt)),mul(A,Math.sin(tilt))));
+          const W=add(mul(U,-Math.sin(a)),mul(V,Math.cos(a)));
+          ribbon(C, D, W, len*HS*R(0.9,1.08), width*HS, A, curl*HS, col, tip, {start:rc*HS});
+        }
+      };
+      if(type==='daisy'){
+        petals(16,0.21,0.04,0.08,0.03,[236,236,226],[250,250,244],0.04);
+        blob(add(C,mul(A,0.018)),A,U,V,0.055*HS,0.55,[248,196,38]);
+      } else if(type==='susan'){
+        petals(13,0.19,0.05,-0.28,-0.05,[244,160,18],[252,196,40],0.05);
+        blob(add(C,mul(A,0.03)),A,U,V,0.065*HS,0.9,[92,52,22]);
+      } else if(type==='poppy'){
+        petals(4,0.16,0.12,0.45,0.14,[214,40,34],[240,70,48],0.01,0);
+        petals(4,0.14,0.10,0.65,0.12,[200,32,30],[232,58,44],0.0,Math.PI/4);
+        blob(add(C,mul(A,0.06)),A,U,V,0.03*HS,1.0,[46,36,52]);
+      } else if(type==='cosmos'){
+        petals(8,0.19,0.075,0.12,0.04,[232,96,170],[248,150,205],0.02);
+        blob(add(C,mul(A,0.015)),A,U,V,0.03*HS,0.8,[250,205,50]);
+      } else if(type==='cone'){
+        petals(14,0.18,0.04,-0.5,-0.06,[196,92,186],[220,130,210],0.04);
+        blob(add(C,mul(A,0.045)),A,U,V,0.06*HS,1.3,[196,96,30]);
+      } else if(type==='gpoppy'){
+        petals(4,0.14,0.11,0.55,0.12,[250,140,20],[255,190,60],0.01,0);
+        petals(4,0.12,0.09,0.75,0.10,[245,120,15],[255,175,50],0.0,Math.PI/4);
+        blob(add(C,mul(A,0.04)),A,U,V,0.022*HS,1.0,[120,160,60]);
+      } else if(type==='corn'){
+        petals(18,0.11,0.022,0.35,0.03,[64,104,230],[110,150,250],0.02);
+        blob(add(C,mul(A,0.015)),A,U,V,0.03*HS,0.8,[70,50,150]);
+      } else if(type==='lupine'){
+        const L=0.6, lv=44;
+        for(let k=0;k<lv;k++){
+          const t=k/lv, base=add(C,mul(A,t*L)), rr=0.075*(1-t*0.75);
+          const col=lerp3([128,70,214],[232,150,232],t);
+          for(let m=0;m<3;m++){
+            const a=k*2.4+m*2.094;
+            const off=add(mul(U,Math.cos(a)*rr),mul(V,Math.sin(a)*rr));
+            blob(add(base,off),A,U,V,0.028*(1-t*0.4),1,col,34,-1);
+          }
+        }
+      } else if(type==='lace'){
+        const rays=34;
+        for(let k=0;k<rays;k++){
+          const a=R(0,Math.PI*2), d=Math.sqrt(R(0.05,1))*0.3;
+          const r=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));
+          const E=add(C, add(mul(r,d), mul(A, 0.16 - d*d*1.0)));
+          for(let s=0;s<=12;s++){const q=lerp3(C,E,s/12);put(q,r,[110,150,80]);}
+          for(let f=0;f<22;f++){
+            const fa=R(0,Math.PI*2), fd=Math.sqrt(R())*0.045;
+            put(add(E,add(mul(U,Math.cos(fa)*fd),mul(V,Math.sin(fa)*fd))), A, [246,242,224]);
+          }
+        }
+      }
+    }
+
+    // place flowers with simple rejection sampling
+    const types=['cosmos','cosmos','cone','cone','gpoppy','gpoppy','daisy','corn','lupine','lupine','lace','susan'];
+    const spots=[];
+    for(let tries=0; spots.length<19 && tries<2000; tries++){
+      const r=Math.sqrt(R())*2.0, a=R(0,Math.PI*2);
+      const x=Math.cos(a)*r, z=Math.sin(a)*r;
+      if(spots.every(s=>Math.hypot(s[0]-x,s[1]-z)>0.62)) spots.push([x,z]);
+    }
+    for(const [x,z] of spots) flower(x,z,types[Math.floor(R()*types.length)]);
+
+    // grass
+    for(let g=0; g<110; g++){
+      phase=R(0,Math.PI*2); sway=2.6;
+      const r=Math.sqrt(R())*2.6, a=R(0,Math.PI*2);
+      const base=[Math.cos(a)*r,0,Math.sin(a)*r];
+      const hb=R(0.25,0.7), b=R(0,Math.PI*2), lean=R(0.05,0.3);
+      const W=[-Math.sin(b),0,Math.cos(b)];
+      const g0=[R(40,70),R(105,150),R(40,60)];
+      const us=Math.round(hb*90);
+      for(let i=0;i<=us;i++){
+        const u=i/us;
+        const P=add(base,[Math.cos(b)*lean*u*u, hb*u, Math.sin(b)*lean*u*u]);
+        const dPu=[Math.cos(b)*lean*2*u, hb, Math.sin(b)*lean*2*u];
+        const N=cross(dPu,W), col=mul(g0,0.55+0.6*u);
+        for(let j=-1;j<=1;j++) put(add(P,mul(W,j*0.012*(1-u))),N,col);
+      }
+    }
+
+    // ground speckle
+    phase=0; sway=0;
+    for(let i=0;i<2600;i++){
+      const r=Math.sqrt(rnd())*2.8, a=rnd()*Math.PI*2;
+      put([Math.cos(a)*r,0,Math.sin(a)*r],[0,1,0],[R(70,100),R(80,105),R(40,55)],1);
+    }
+
+    const F=a=>Float32Array.from(a);
+    PTS={X:F(X),Y:F(Y),Z:F(Z),NX:F(NX),NY:F(NY),NZ:F(NZ),CR:F(CR),CG:F(CG),CB:F(CB),SW:F(SW),PH:F(PH),KD:Uint8Array.from(KD),n:X.length};
+  }
+
+  // ---------- render state ----------
+  let W=0,H=0,dpr=1,fs=10,cw=6,ch=10,cols=0,rows=0;
+  let zb,lb,rb,gb,bb;
+  const state={theta:0.6, phi:0.36, dist:6.2, speed:1, wind:1, paused:false, mono:false, dragging:false};
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduce) state.paused=true;
+
+  function resize(){
+    dpr=Math.min(window.devicePixelRatio||1,2);
+    W=innerWidth; H=innerHeight;
+    canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    fs=Math.max(6, Math.min(12, W/170/0.6));
+    ctx.font=`500 ${fs}px "JetBrains Mono", ui-monospace, Menlo, monospace`;
+    cw=ctx.measureText('@').width||fs*0.6; ch=fs*1.05;
+    cols=Math.ceil(W/cw); rows=Math.ceil(H/ch);
+    const n=cols*rows;
+    zb=new Float32Array(n); lb=new Float32Array(n); rb=new Uint8Array(n); gb=new Uint8Array(n); bb=new Uint8Array(n);
+  }
+
+  const colorCache=new Array(32768);
+  const colStr=(r,g,b)=>{const k=(r>>3)<<10|(g>>3)<<5|(b>>3);return colorCache[k]||(colorCache[k]=`rgb(${(r>>3)<<3},${(g>>3)<<3},${(b>>3)<<3})`);};
+
+  const LIGHT=norm([-0.5,0.78,-0.45]);
+
+  function render(t){
+    const P=PTS; if(!P) return;
+    zb.fill(0);
+    const ct=Math.cos(state.theta), st=Math.sin(state.theta);
+    const cp=Math.cos(state.phi), sp=Math.sin(state.phi);
+    const D=state.dist, K=Math.min(W*1.0, H*1.2);
+    const hx=W/2, hy=H*0.49;
+    const amp=0.035*state.wind;
+    const Lx=LIGHT[0],Ly=LIGHT[1],Lz=LIGHT[2];
+    const {X,Y,Z,NX,NY,NZ,CR,CG,CB,SW,PH,KD,n}=P;
+    const near=D-3;
+    for(let i=0;i<n;i++){
+      const y0=Y[i], s=SW[i]*y0*y0*amp, ph=PH[i];
+      const x=X[i]+s*Math.sin(t*1.15+ph);
+      const z=Z[i]+s*0.6*Math.cos(t*0.83+ph*1.3);
+      const y=y0-0.95;
+      const x1=x*ct+z*st, z1=-x*st+z*ct;
+      const y2=y*cp+z1*sp, z2=-y*sp+z1*cp;
+      const zz=z2+D; if(zz<0.5) continue;
+      const ooz=1/zz;
+      const sx=((hx+K*x1*ooz)/cw)|0, sy=((hy-K*y2*ooz)/ch)|0;
+      if(sx<0||sy<0||sx>=cols||sy>=rows) continue;
+      const idx=sy*cols+sx;
+      if(ooz<=zb[idx]) continue;
+      zb[idx]=ooz;
+      const nx=NX[i],ny=NY[i],nz=NZ[i];
+      const n1z=-nx*st+nz*ct;
+      const n1x=nx*ct+nz*st, n2y=ny*cp+n1z*sp, n2z=-ny*sp+n1z*cp;
+      let d=n1x*Lx+n2y*Ly+n2z*Lz; if(d<0) d=-d*0.8;
+      let l = KD[i]? 0.05+0.22*d : 0.14+0.86*d;
+      const fog=Math.max(0.42, Math.min(1, 1.15-(zz-near)*0.11));
+      lb[idx]=l*(0.75+0.25*fog);
+      const shade=(0.38+0.72*l)*fog;
+      rb[idx]=Math.min(255,CR[i]*shade); gb[idx]=Math.min(255,CG[i]*shade); bb[idx]=Math.min(255,CB[i]*shade);
+    }
+    ctx.clearRect(0,0,W,H);
+    ctx.textBaseline='top';
+    const mono=state.mono, top=RAMP.length-1;
+    for(let sy=0;sy<rows;sy++){
+      const row=sy*cols, py=sy*ch;
+      for(let sx=0;sx<cols;sx++){
+        const idx=row+sx; if(zb[idx]===0) continue;
+        const l=lb[idx];
+        const ci=Math.min(top, (l*RAMP.length)|0);
+        if(mono){ const v=0.25+0.85*l; ctx.fillStyle=colStr(Math.min(255,90*v),Math.min(255,255*v),Math.min(255,130*v)); }
+        else ctx.fillStyle=colStr(rb[idx],gb[idx],bb[idx]);
+        ctx.fillText(RAMP[ci], sx*cw, py);
+      }
+    }
+  }
+
+  // ---------- loop ----------
+  let last=performance.now(), clock=0;
+  function frame(now){
+    const dt=Math.min(0.05,(now-last)/1000); last=now;
+    if(!state.paused){
+      clock+=dt;
+      if(!state.dragging) state.theta+=dt*0.28*state.speed;
+    }
+    render(clock);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- interaction ----------
+  let px=0,py=0;
+  canvas.addEventListener('pointerdown',e=>{state.dragging=true;px=e.clientX;py=e.clientY;canvas.setPointerCapture(e.pointerId);canvas.classList.add('dragging');});
+  canvas.addEventListener('pointermove',e=>{
+    if(!state.dragging) return;
+    state.theta+=(e.clientX-px)*0.008;
+    state.phi=Math.max(0.02,Math.min(1.15,state.phi+(e.clientY-py)*0.004));
+    px=e.clientX;py=e.clientY;
+    if(state.paused) render(clock);
+  });
+  const end=()=>{state.dragging=false;canvas.classList.remove('dragging');};
+  canvas.addEventListener('pointerup',end); canvas.addEventListener('pointercancel',end);
+  canvas.addEventListener('wheel',e=>{e.preventDefault();state.dist=Math.max(4.6,Math.min(12,state.dist*(1+Math.sign(e.deltaY)*0.06)));},{passive:false});
+
+
+  addEventListener('resize',resize);
+  build(81142026);
+  resize();
+  (document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(()=>{resize();});
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
