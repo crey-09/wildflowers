@@ -36,7 +36,7 @@
   function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 
   // ---------- point cloud ----------
-  let PTS = null;
+  let PTS = null, SNOW = null, CY = 0.95;
 
   function build(seed, combo){
     const rnd = mulberry32(seed);
@@ -77,32 +77,24 @@
       }
     }
 
-    const STEM=[74,140,62], LEAF=[66,158,70];
-
     const HS=1.55;
-    function flower(x,z,type){
-      phase = R(0,Math.PI*2); sway = 1;
-      const h = type==='lace'? R(1.4,1.9) : type==='lupine'? R(1.0,1.4) : R(0.95,1.9);
-      const bx=R(-0.25,0.25), bz=R(-0.25,0.25);
-      const Pt=t=>[x+bx*t*t, h*t, z+bz*t*t];
-      const Tt=t=>norm([2*bx*t, h, 2*bz*t]);
-      // stem
-      const steps=Math.round(h*75), ang=6, sr=0.016;
-      for(let i=0;i<=steps;i++){
-        const t=i/steps, c=Pt(t), T=Tt(t), [U,V]=basis(T);
-        for(let k=0;k<ang;k++){const a=k/ang*Math.PI*2;const n=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));put(add(c,mul(n,sr)),n,STEM);}
-      }
-      // leaves
-      const nl = type==='lace'?3:2;
-      for(let l=0;l<nl;l++){
-        const t=R(0.18,0.55), b=R(0,Math.PI*2);
-        const r=[Math.cos(b),0,Math.sin(b)];
-        const D=norm(add(mul(r,0.8),[0,0.6,0])), W=[-Math.sin(b),0,Math.cos(b)];
-        ribbon(Pt(t), D, W, R(0.18,0.28), 0.035, [0,1,0], -0.09, LEAF, [96,178,84]);
-      }
-      // head
-      const C=Pt(1);
-      const A=norm(add(Tt(1), [R(-0.35,0.35),0.1,R(-0.35,0.35)]));
+    const STEM=[74,140,62], LEAF=[66,158,70];
+    const STEM_DRY=[128,104,70], LEAF_DRY=[140,112,72];
+    const DRY={seedhead:1, drylace:1};
+    const HEIGHT={lace:[1.4,1.9], drylace:[1.3,1.8], lupine:[1.0,1.4], goldenrod:[1.2,1.8], aster:[0.85,1.35],
+                  seedhead:[0.9,1.6], snowdrop:[0.5,0.78], crocus:[0.3,0.5], hellebore:[0.45,0.72]};
+    const UP=[0,1,0];
+    const SCALE={snowdrop:3.0, crocus:2.7, hellebore:1.9};
+    let S=HS;
+
+    // a thin stalk between two points (branches, pedicels)
+    function stalk(a,b,col){
+      const d=norm(add(b,mul(a,-1))), n=Math.max(4,Math.round(Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2])*70));
+      const [U]=basis(d);
+      for(let i=0;i<=n;i++) put(lerp3(a,b,i/n),U,col);
+    }
+
+    function head(C, A, type){
       const [U,V]=basis(A);
       const petals=(n,len,width,tilt,curl,col,tip,rc,off=0)=>{
         for(let k=0;k<n;k++){
@@ -110,32 +102,54 @@
           const r=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));
           const D=norm(add(mul(r,Math.cos(tilt)),mul(A,Math.sin(tilt))));
           const W=add(mul(U,-Math.sin(a)),mul(V,Math.cos(a)));
-          ribbon(C, D, W, len*HS*R(0.9,1.08), width*HS, A, curl*HS, col, tip, {start:rc*HS});
+          ribbon(C, D, W, len*S*R(0.9,1.08), width*S, A, curl*S, col, tip, {start:rc*S});
         }
       };
+      const ctr=(lift,r,flat,col)=>blob(add(C,mul(A,lift)),A,U,V,r*S,flat,col);
       if(type==='daisy'){
         petals(16,0.21,0.04,0.08,0.03,[236,236,226],[250,250,244],0.04);
-        blob(add(C,mul(A,0.018)),A,U,V,0.055*HS,0.55,[248,196,38]);
+        ctr(0.018,0.055,0.55,[248,196,38]);
       } else if(type==='susan'){
         petals(13,0.19,0.05,-0.28,-0.05,[244,160,18],[252,196,40],0.05);
-        blob(add(C,mul(A,0.03)),A,U,V,0.065*HS,0.9,[92,52,22]);
+        ctr(0.03,0.065,0.9,[92,52,22]);
       } else if(type==='poppy'){
         petals(4,0.16,0.12,0.45,0.14,[214,40,34],[240,70,48],0.01,0);
         petals(4,0.14,0.10,0.65,0.12,[200,32,30],[232,58,44],0.0,Math.PI/4);
-        blob(add(C,mul(A,0.06)),A,U,V,0.03*HS,1.0,[46,36,52]);
+        ctr(0.06,0.03,1.0,[46,36,52]);
       } else if(type==='cosmos'){
-        petals(8,0.19,0.075,0.12,0.04,[232,96,170],[248,150,205],0.02);
-        blob(add(C,mul(A,0.015)),A,U,V,0.03*HS,0.8,[250,205,50]);
+        const pal=[[[232,96,170],[248,150,205]],[[245,235,240],[255,250,252]],[[200,40,110],[230,90,150]]][Math.floor(R()*3)];
+        petals(8,0.19,0.075,0.12,0.04,pal[0],pal[1],0.02);
+        ctr(0.015,0.03,0.8,[250,205,50]);
       } else if(type==='cone'){
         petals(14,0.18,0.04,-0.5,-0.06,[196,92,186],[220,130,210],0.04);
-        blob(add(C,mul(A,0.045)),A,U,V,0.06*HS,1.3,[196,96,30]);
+        ctr(0.045,0.06,1.3,[196,96,30]);
       } else if(type==='gpoppy'){
         petals(4,0.14,0.11,0.55,0.12,[250,140,20],[255,190,60],0.01,0);
         petals(4,0.12,0.09,0.75,0.10,[245,120,15],[255,175,50],0.0,Math.PI/4);
-        blob(add(C,mul(A,0.04)),A,U,V,0.022*HS,1.0,[120,160,60]);
+        ctr(0.04,0.022,1.0,[120,160,60]);
       } else if(type==='corn'){
         petals(18,0.11,0.022,0.35,0.03,[64,104,230],[110,150,250],0.02);
-        blob(add(C,mul(A,0.015)),A,U,V,0.03*HS,0.8,[70,50,150]);
+        ctr(0.015,0.03,0.8,[70,50,150]);
+      } else if(type==='aster'){
+        const pal=R()<0.5?[[150,120,232],[188,168,250]]:[[120,100,220],[160,150,245]];
+        petals(26,0.10,0.013,0.12,0.02,pal[0],pal[1],0.02);
+        ctr(0.01,0.022,0.8,[244,200,50]);
+      } else if(type==='seedhead'){
+        ctr(0.04,0.06,1.4,[64,42,28]);
+        petals(9,0.07,0.018,-1.1,0,[96,70,48],[80,58,40],0.03);
+      } else if(type==='snowdrop'){
+        petals(3,0.075,0.034,0.95,-0.02,[244,248,244],[255,255,255],0.005);
+        petals(3,0.045,0.022,1.35,0,[236,244,236],[120,196,112],0,Math.PI/3);
+        blob(C,A,U,V,0.014*S,1.2,[96,160,80],40,-1);
+      } else if(type==='crocus'){
+        const pal=[[[140,84,210],[196,156,240]],[[236,232,246],[250,248,255]],[[240,190,30],[255,220,80]]][Math.floor(R()*3)];
+        petals(3,0.12,0.05,1.12,0.02,pal[0],pal[1],0);
+        petals(3,0.11,0.045,1.2,0.02,pal[0],pal[1],0,Math.PI/3);
+        ctr(0.05,0.014,2.0,[250,140,30]);
+      } else if(type==='hellebore'){
+        const pal=[[[232,238,218],[206,226,190]],[[226,156,176],[206,120,150]],[[128,48,90],[150,70,110]]][Math.floor(R()*3)];
+        petals(5,0.10,0.06,0.5,0.05,pal[0],pal[1],0.01);
+        ctr(0.012,0.025,0.8,[220,210,90]);
       } else if(type==='lupine'){
         const L=0.6, lv=44;
         for(let k=0;k<lv;k++){
@@ -147,17 +161,89 @@
             blob(add(base,off),A,U,V,0.028*(1-t*0.4),1,col,34,-1);
           }
         }
-      } else if(type==='lace'){
-        const rays=34;
-        for(let k=0;k<rays;k++){
+      } else if(type==='goldenrod'){
+        const d=norm([R(-1,1),0,R(-1,1)]);
+        const plumes=[[C,A,0.55],[add(C,mul(A,-0.12)),norm(add(A,mul(d,-0.9))),0.32],[add(C,mul(A,-0.2)),norm(add(A,mul(d,0.5))),0.28]];
+        for(const [P0,Ax,L] of plumes){
+          const [u2,v2]=basis(Ax), lv=Math.round(L*70);
+          for(let k=0;k<lv;k++){
+            const t=k/lv, base=add(P0,add(mul(Ax,t*L),mul(d,t*t*0.22)));
+            const col=lerp3([214,170,28],[250,216,70],t);
+            for(let m=0;m<2;m++){
+              const a=R(0,Math.PI*2), rr=0.045*(1-t*0.6)*Math.sqrt(R());
+              blob(add(base,add(mul(u2,Math.cos(a)*rr),mul(v2,Math.sin(a)*rr+0.01))),UP,u2,v2,0.016,1,col,22,-0.4);
+            }
+          }
+        }
+      } else if(type==='lace' || type==='drylace'){
+        const dry=type==='drylace';
+        for(let k=0;k<34;k++){
           const a=R(0,Math.PI*2), d=Math.sqrt(R(0.05,1))*0.3;
           const r=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));
-          const E=add(C, add(mul(r,d), mul(A, 0.16 - d*d*1.0)));
-          for(let s=0;s<=12;s++){const q=lerp3(C,E,s/12);put(q,r,[110,150,80]);}
+          // fresh lace is a flat-topped umbrella; dried lace curls into a "bird's nest" cup
+          const E=add(C, add(mul(r,dry?d*0.75:d), mul(A, dry? 0.05+d*d*1.6 : 0.16-d*d*1.0)));
+          for(let s=0;s<=12;s++) put(lerp3(C,E,s/12),r,dry?[130,104,68]:[110,150,80]);
           for(let f=0;f<22;f++){
             const fa=R(0,Math.PI*2), fd=Math.sqrt(R())*0.045;
-            put(add(E,add(mul(U,Math.cos(fa)*fd),mul(V,Math.sin(fa)*fd))), A, [246,242,224]);
+            put(add(E,add(mul(U,Math.cos(fa)*fd),mul(V,Math.sin(fa)*fd))), A, dry?[156,128,88]:[246,242,224]);
           }
+        }
+      }
+    }
+
+    function flower(x,z,type){
+      phase = R(0,Math.PI*2); sway = 1; S=HS;
+      const dry=!!DRY[type];
+      const hr=HEIGHT[type]||[0.95,1.9];
+      const h = R(hr[0],hr[1]);
+      const bx=R(-0.25,0.25)*h/1.4, bz=R(-0.25,0.25)*h/1.4;
+      const Pt=t=>[x+bx*t*t, h*t, z+bz*t*t];
+      const Tt=t=>norm([2*bx*t, h, 2*bz*t]);
+      const stemCol=dry?STEM_DRY:STEM, leafCol=dry?LEAF_DRY:LEAF;
+      // stem
+      const steps=Math.max(20,Math.round(h*75)), ang=6, sr=0.016;
+      for(let i=0;i<=steps;i++){
+        const t=i/steps, c=Pt(t), T=Tt(t), [U,V]=basis(T);
+        for(let k=0;k<ang;k++){const a=k/ang*Math.PI*2;const n=add(mul(U,Math.cos(a)),mul(V,Math.sin(a)));put(add(c,mul(n,sr)),n,stemCol);}
+      }
+      // leaves: bulbs and hellebores get long strap leaves from the ground, the rest get stem leaves
+      if(type==='snowdrop'||type==='crocus'||type==='hellebore'){
+        const nl=type==='hellebore'?4:2;
+        for(let l=0;l<nl;l++){
+          const b=R(0,Math.PI*2), r=[Math.cos(b),0,Math.sin(b)];
+          const D=norm(add(mul(r,type==='hellebore'?0.9:0.25),UP)), W=[-Math.sin(b),0,Math.cos(b)];
+          ribbon([x,0,z], D, W, h*R(0.6,0.95), type==='hellebore'?0.05:0.011, r, 0.08, [48,108,62], [70,132,76]);
+        }
+      } else {
+        const nl=(type==='lace'||type==='goldenrod')?3:2;
+        for(let l=0;l<nl;l++){
+          const t=R(0.18,0.55), b=R(0,Math.PI*2);
+          const r=[Math.cos(b),0,Math.sin(b)];
+          const D=norm(add(mul(r,0.8),[0,0.6,0])), W=[-Math.sin(b),0,Math.cos(b)];
+          ribbon(Pt(t), D, W, R(0.18,0.28), 0.035, UP, -0.09, leafCol, dry?[150,124,84]:[96,178,84]);
+        }
+      }
+      // head
+      S=HS*(SCALE[type]||1);
+      const C=Pt(1);
+      const side=norm([R(-1,1),0,R(-1,1)]);
+      if(type==='snowdrop'){
+        // nodding bell on a short arched pedicel
+        const E=add(C,add(mul(side,0.06*S/HS),[0,0.015*S/HS,0]));
+        stalk(C,E,stemCol);
+        head(E, norm(add(mul(side,0.35),[0,-1,0])), type);
+      } else if(type==='hellebore'){
+        head(C, norm(add(mul(side,0.9),[0,-0.25,0])), type);
+      } else {
+        head(C, norm(add(Tt(1), [R(-0.35,0.35),0.1,R(-0.35,0.35)])), type);
+      }
+      // asters branch into a little spray of extra heads
+      if(type==='aster'){
+        for(let k=0;k<3;k++){
+          const t=R(0.55,0.85), P0=Pt(t), b=R(0,Math.PI*2), dir=[Math.cos(b),0,Math.sin(b)];
+          const E=add(P0,add(mul(dir,R(0.14,0.24)),[0,R(0.1,0.22),0]));
+          stalk(P0,E,stemCol);
+          S=HS*0.8; head(E, norm(add(mul(dir,0.5),UP)), 'aster'); S=HS;
         }
       }
     }
@@ -179,7 +265,9 @@
       const base=[Math.cos(a)*r,0,Math.sin(a)*r];
       const hb=R(0.25,0.7), b=R(0,Math.PI*2), lean=R(0.05,0.3);
       const W=[-Math.sin(b),0,Math.cos(b)];
-      const g0=[R(40,70),R(105,150),R(40,60)];
+      const g0 = combo.tone==='dry'    ? [R(130,165),R(110,132),R(70,90)]
+               : combo.tone==='autumn' ? (R()<0.5?[R(110,160),R(115,140),R(45,65)]:[R(55,80),R(105,135),R(45,60)])
+               : [R(40,70),R(105,150),R(40,60)];
       const us=Math.round(hb*90);
       for(let i=0;i<=us;i++){
         const u=i/us;
@@ -194,40 +282,69 @@
     phase=0; sway=0;
     for(let i=0;i<2600;i++){
       const r=Math.sqrt(rnd())*2.8, a=rnd()*Math.PI*2;
-      put([Math.cos(a)*r,0,Math.sin(a)*r],[0,1,0],[R(70,100),R(80,105),R(40,55)],1);
+      const gc = combo.snow ? [R(175,215),R(185,220),R(200,235)]
+               : combo.tone==='autumn' ? [R(90,120),R(75,95),R(40,55)]
+               : combo.tone==='dry' ? [R(95,120),R(85,100),R(60,75)]
+               : [R(70,100),R(80,105),R(40,55)];
+      put([Math.cos(a)*r,0,Math.sin(a)*r],[0,1,0],gc,1);
     }
 
     const F=a=>Float32Array.from(a);
+    // falling snow (winter combos only)
+    const ns=(combo.snow||0)*380, SX=new Float32Array(ns), SY=new Float32Array(ns), SZ=new Float32Array(ns), SP=new Float32Array(ns), SV=new Float32Array(ns);
+    for(let i=0;i<ns;i++){ const r=Math.sqrt(rnd())*3.2, a=rnd()*Math.PI*2; SX[i]=Math.cos(a)*r; SZ[i]=Math.sin(a)*r; SY[i]=rnd()*3.4; SP[i]=rnd()*6.28; SV[i]=R(0.12,0.3); }
+    SNOW={SX,SY,SZ,SP,SV,n:ns};
     PTS={X:F(X),Y:F(Y),Z:F(Z),NX:F(NX),NY:F(NY),NZ:F(NZ),CR:F(CR),CG:F(CG),CB:F(CB),SW:F(SW),PH:F(PH),KD:Uint8Array.from(KD),n:X.length};
   }
 
-  // ---------- flower combos: one is picked at random on every load ----------
+  // ---------- flower combos, each tied to the months its flowers bloom (northern hemisphere) ----------
   const COMBOS = [
-    { name:'prairie',      n:20, gap:0.58, grass:150, types:['susan','susan','cone','cone','lupine','corn','lace','daisy'] },
-    { name:'cottage',      n:19, gap:0.60, grass:100, types:['cosmos','cosmos','daisy','daisy','lace','corn','cone'] },
-    { name:'poppy field',  n:24, gap:0.52, grass:130, types:['poppy','poppy','poppy','poppy','corn','daisy'] },
-    { name:'golden hills', n:22, gap:0.55, grass:120, types:['gpoppy','gpoppy','gpoppy','lupine','lupine','daisy'] },
-    { name:'daisy patch',  n:24, gap:0.52, grass:110, types:['daisy','daisy','daisy','daisy','lace','corn'] },
-    { name:'lupine slope', n:18, gap:0.64, grass:120, types:['lupine','lupine','lupine','gpoppy','daisy'] },
-    { name:'sunset',       n:20, gap:0.58, grass:100, types:['susan','gpoppy','poppy','cosmos','susan','gpoppy'] },
-    { name:'cool blues',   n:20, gap:0.58, grass:110, types:['corn','corn','lupine','cone','daisy','lace'] },
-    { name:'pink parade',  n:19, gap:0.60, grass:100, types:['cosmos','cosmos','cone','cone','poppy','lace'] },
-    { name:'moonlight',    n:20, gap:0.58, grass:90,  types:['lace','lace','daisy','daisy','daisy','corn'] },
-    { name:'wild mix',     n:21, gap:0.56, grass:120, types:['daisy','susan','poppy','gpoppy','cosmos','cone','corn','lupine','lace'] },
-    { name:'sparse & tall',n:11, gap:0.95, grass:70,  types:['lace','lupine','cosmos','susan','cone'] },
+    // winter
+    { name:'christmas roses',   months:[12,1,2,3], cy:0.55, dist:5.4, n:22, gap:0.5,  grass:60,  tone:'dry',    snow:1, types:['hellebore','hellebore','hellebore','seedhead','drylace'] },
+    { name:'frosted seedheads', months:[11,12,1],  n:20, gap:0.56, grass:90,  tone:'dry',    snow:1, types:['seedhead','seedhead','seedhead','drylace','drylace'] },
+    { name:'first snow',        months:[12,1,2],   n:16, gap:0.66, grass:70,  tone:'dry',    snow:2, types:['seedhead','drylace','seedhead','hellebore'] },
+    { name:'snowdrops',         months:[1,2,3],    cy:0.55, dist:5.4, n:30, gap:0.4,  grass:50,  tone:'dry',    snow:0, types:['snowdrop','snowdrop','snowdrop','snowdrop','seedhead'] },
+    // spring
+    { name:'crocus carpet',     months:[2,3,4],    cy:0.5,  dist:5.2, n:32, gap:0.38, grass:60,  tone:'green',  types:['crocus','crocus','crocus','crocus','snowdrop'] },
+    { name:'golden hills',      months:[3,4,5],    n:22, gap:0.55, grass:120, tone:'green',  types:['gpoppy','gpoppy','gpoppy','lupine','lupine','daisy'] },
+    { name:'lupine slope',      months:[4,5,6],    n:18, gap:0.64, grass:120, tone:'green',  types:['lupine','lupine','lupine','gpoppy','daisy'] },
+    { name:'daisy patch',       months:[5,6,7],    n:24, gap:0.52, grass:110, tone:'green',  types:['daisy','daisy','daisy','daisy','lace','corn'] },
+    { name:'poppy field',       months:[5,6],      n:24, gap:0.52, grass:130, tone:'green',  types:['poppy','poppy','poppy','poppy','corn','daisy'] },
+    // summer
+    { name:'cool blues',        months:[6,7,8],    n:20, gap:0.58, grass:110, tone:'green',  types:['corn','corn','lupine','cone','daisy','lace'] },
+    { name:'cottage',           months:[6,7,8],    n:19, gap:0.60, grass:100, tone:'green',  types:['cosmos','cosmos','daisy','daisy','lace','corn','cone'] },
+    { name:'moonlight',         months:[6,7,8],    n:20, gap:0.58, grass:90,  tone:'green',  types:['lace','lace','daisy','daisy','daisy','corn'] },
+    { name:'wild mix',          months:[6,7,8],    n:21, gap:0.56, grass:120, tone:'green',  types:['daisy','susan','poppy','gpoppy','cosmos','cone','corn','lace'] },
+    { name:'prairie',           months:[7,8,9],    n:20, gap:0.58, grass:150, tone:'green',  types:['susan','susan','cone','cone','corn','lace','daisy'] },
+    { name:'pink parade',       months:[7,8,9],    n:19, gap:0.60, grass:100, tone:'green',  types:['cosmos','cosmos','cone','cone','lace'] },
+    { name:'sunset',            months:[7,8,9],    n:20, gap:0.58, grass:100, tone:'green',  types:['susan','gpoppy','cosmos','susan','gpoppy','cone'] },
+    { name:'sparse & tall',     months:[7,8,9],    n:11, gap:0.95, grass:70,  tone:'green',  types:['lace','cosmos','susan','cone','goldenrod'] },
+    // fall
+    { name:'late prairie',      months:[8,9,10],   n:20, gap:0.58, grass:150, tone:'autumn', types:['susan','cone','goldenrod','aster','lace'] },
+    { name:'aster & goldenrod', months:[9,10],     n:18, gap:0.62, grass:120, tone:'autumn', types:['aster','aster','goldenrod','goldenrod','susan'] },
+    { name:'last cosmos',       months:[9,10],     n:19, gap:0.60, grass:100, tone:'autumn', types:['cosmos','cosmos','aster','aster','goldenrod'] },
+    { name:'late asters',       months:[10,11],    n:18, gap:0.62, grass:110, tone:'autumn', types:['aster','aster','aster','seedhead','drylace'] },
+    { name:'going to seed',     months:[10,11],    n:20, gap:0.58, grass:120, tone:'autumn', types:['seedhead','seedhead','aster','goldenrod','drylace','susan'] },
   ];
   function pickCombo(){
-    let last=-1;
-    try { last = parseInt(localStorage.getItem('wildflowers-last-combo'),10); } catch(e) {}
-    let i;
-    do { i = Math.floor(Math.random()*COMBOS.length); } while (COMBOS.length>1 && i===last);
-    try { localStorage.setItem('wildflowers-last-combo', String(i)); } catch(e) {}
-    return COMBOS[i];
+    const now = new Date();                       // the visitor's own local clock
+    const month = window.__month || (now.getMonth()+1);
+    const year = now.getFullYear();
+    let pool = COMBOS.filter(c=>c.months.includes(month));
+    if(!pool.length) pool = COMBOS;
+    if(window.__combo) pool = COMBOS.filter(c=>c.name===window.__combo);
+    // one combo for the whole month: a fixed pick from this year+month, so every
+    // load (and every visitor in the same month) sees the same flowers
+    let h = (year*12 + month) >>> 0;
+    h = Math.imul(h ^ (h>>>15), 2246822519) >>> 0;
+    h = Math.imul(h ^ (h>>>13), 3266489917) >>> 0;
+    h = (h ^ (h>>>16)) >>> 0;
+    return pool[h % pool.length];
   }
 
   // ---------- render state ----------
   let W=0,H=0,dpr=1,fs=10,cw=6,ch=10,cols=0,rows=0;
-  let zb,lb,rb,gb,bb;
+  let zb,lb,rb,gb,bb,ob;
   const state={theta:Math.random()*Math.PI*2, phi:0.36, dist:6.2, speed:1, wind:1, paused:false, mono:false, dragging:false};
   const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   if(reduce) state.paused=true;
@@ -242,7 +359,7 @@
     cw=ctx.measureText('@').width||fs*0.6; ch=fs*1.05;
     cols=Math.ceil(W/cw); rows=Math.ceil(H/ch);
     const n=cols*rows;
-    zb=new Float32Array(n); lb=new Float32Array(n); rb=new Uint8Array(n); gb=new Uint8Array(n); bb=new Uint8Array(n);
+    zb=new Float32Array(n); lb=new Float32Array(n); rb=new Uint8Array(n); gb=new Uint8Array(n); bb=new Uint8Array(n); ob=new Uint8Array(n);
   }
 
   const colorCache=new Array(32768);
@@ -252,7 +369,7 @@
 
   function render(t){
     const P=PTS; if(!P) return;
-    zb.fill(0);
+    zb.fill(0); ob.fill(0);
     const ct=Math.cos(state.theta), st=Math.sin(state.theta);
     const cp=Math.cos(state.phi), sp=Math.sin(state.phi);
     const D=state.dist, K=Math.min(W*1.0, H*1.2);
@@ -265,7 +382,7 @@
       const y0=Y[i], s=SW[i]*y0*y0*amp, ph=PH[i];
       const x=X[i]+s*Math.sin(t*1.15+ph);
       const z=Z[i]+s*0.6*Math.cos(t*0.83+ph*1.3);
-      const y=y0-0.95;
+      const y=y0-CY;
       const x1=x*ct+z*st, z1=-x*st+z*ct;
       const y2=y*cp+z1*sp, z2=-y*sp+z1*cp;
       const zz=z2+D; if(zz<0.5) continue;
@@ -274,7 +391,7 @@
       if(sx<0||sy<0||sx>=cols||sy>=rows) continue;
       const idx=sy*cols+sx;
       if(ooz<=zb[idx]) continue;
-      zb[idx]=ooz;
+      zb[idx]=ooz; ob[idx]=0;
       const nx=NX[i],ny=NY[i],nz=NZ[i];
       const n1z=-nx*st+nz*ct;
       const n1x=nx*ct+nz*st, n2y=ny*cp+n1z*sp, n2z=-ny*sp+n1z*cp;
@@ -284,6 +401,25 @@
       lb[idx]=l*(0.75+0.25*fog);
       const shade=(0.38+0.72*l)*fog;
       rb[idx]=Math.min(255,CR[i]*shade); gb[idx]=Math.min(255,CG[i]*shade); bb[idx]=Math.min(255,CB[i]*shade);
+    }
+    if(SNOW && SNOW.n){
+      const {SX,SY,SZ,SP,SV}=SNOW;
+      for(let i=0;i<SNOW.n;i++){
+        const y=((SY[i]-t*SV[i])%3.4+3.4)%3.4 - CY - 0.1;
+        const x=SX[i]+0.12*Math.sin(t*0.7+SP[i]), z=SZ[i]+0.08*Math.cos(t*0.5+SP[i]);
+        const x1=x*ct+z*st, z1=-x*st+z*ct;
+        const y2=y*cp+z1*sp, z2=-y*sp+z1*cp;
+        const zz=z2+D; if(zz<0.5) continue;
+        const ooz=1/zz;
+        const sx=((hx+K*x1*ooz)/cw)|0, sy=((hy-K*y2*ooz)/ch)|0;
+        if(sx<0||sy<0||sx>=cols||sy>=rows) continue;
+        const idx=sy*cols+sx;
+        if(ooz<=zb[idx]) continue;
+        zb[idx]=ooz;
+        const fog=Math.max(0.4, Math.min(1, 1.15-(zz-near)*0.11));
+        ob[idx]= zz<D-0.8 ? 42 : (zz<D+1 ? 43 : 46);   // '*' near, '+' middle, '.' far
+        const v=235*fog; rb[idx]=v; gb[idx]=Math.min(255,v*1.02); bb[idx]=Math.min(255,v*1.08);
+      }
     }
     ctx.clearRect(0,0,W,H);
     ctx.textBaseline='top';
@@ -296,7 +432,7 @@
         const ci=Math.min(top, (l*RAMP.length)|0);
         if(mono){ const v=0.25+0.85*l; ctx.fillStyle=colStr(Math.min(255,90*v),Math.min(255,255*v),Math.min(255,130*v)); }
         else ctx.fillStyle=colStr(rb[idx],gb[idx],bb[idx]);
-        ctx.fillText(RAMP[ci], sx*cw, py);
+        ctx.fillText(ob[idx]?String.fromCharCode(ob[idx]):RAMP[ci], sx*cw, py);
       }
     }
   }
@@ -330,6 +466,8 @@
 
   addEventListener('resize',resize);
   const combo = pickCombo();
+  CY = combo.cy || 0.95;
+  if(combo.dist) state.dist = combo.dist;
   build((Math.random()*4294967296)>>>0, combo);
   resize();
   (document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(()=>{resize();});
